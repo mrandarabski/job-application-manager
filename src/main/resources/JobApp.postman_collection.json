@@ -1,0 +1,84 @@
+{
+  "info": {
+    "name": "JobApp API",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "item": [
+    {
+      "name": "Create User (multipart)",
+      "request": {
+        "method": "POST",
+        "header": [],
+        "body": {
+          "mode": "formdata",
+          "formdata": [
+            {
+              "key": "firstName",
+              "value": "KingZda1",
+              "type": "text"
+            },
+            {
+              "key": "lastName",
+              "value": "Andarabski1",
+              "type": "text"
+            },
+            {
+              "key": "email",
+              "value": "kingzda1.and@gmail.com",
+              "type": "text"
+            },
+            {
+              "key": "password",
+              "value": "12345",
+              "type": "text"
+            },
+            {
+              "key": "age",
+              "value": "13",
+              "type": "text"
+            },
+            {
+              "key": "role",
+              "value": "user",
+              "type": "text"
+            },
+            {
+              "key": "enabled",
+              "value": "true",
+              "type": "text"
+            },
+            {
+              "key": "applications",
+              "value": "[{\"id\": 1}, {\"id\": 2}]",
+              "type": "text"
+            },
+            {
+              "key": "photo",
+              "type": "file",
+              "src": ""
+            },
+            {
+              "key": "cv",
+              "type": "file",
+              "src": ""
+            }
+          ]
+        },
+        "url": {
+          "raw": "http://localhost:8080/api/v1/users",
+          "protocol": "http",
+          "host": [
+            "localhost"
+          ],
+          "port": "8080",
+          "path": [
+            "api",
+            "v1",
+            "users"
+          ]
+        }
+      },
+      "response": []
+    }
+  ]
+}

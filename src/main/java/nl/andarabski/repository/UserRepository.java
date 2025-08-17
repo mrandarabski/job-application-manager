@@ -1,0 +1,9 @@
+package nl.andarabski.repository;
+
+import nl.andarabski.model.User;
+import org.springframework.data.jpa.repository.JpaRepository;
+import org.springframework.stereotype.Repository;
+
+@Repository
+public interface UserRepository extends JpaRepository<User, Long> {
+}

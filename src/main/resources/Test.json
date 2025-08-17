@@ -1,0 +1,15 @@
+[
+  {
+    "id": 1,
+    "motivation": "We will contact you soon.",
+    "status": "Approved",
+    "appliedAt": "2025-08-04"
+  },
+  {
+    "id": 4,
+    "motivation": "We will contact you soon.",
+    "status": "Pending",
+    "appliedAt": "2025-08-04"
+  }
+]
+
