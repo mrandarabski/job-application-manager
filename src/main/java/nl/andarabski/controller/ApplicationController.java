@@ -35,16 +35,16 @@ public class ApplicationController {
         this.applicationDtoToApplicationConverter = applicationDtoToApplicationConverter;
     }
 
-    @GetMapping("/{applicationId}")
+   /* @GetMapping("/{applicationId}")
     public Result findById(@PathVariable Long applicationId){
         Application foudApplication = this.applicationService.findById(applicationId);
         ApplicationDto applicationDto = this.applicationToApplicationDtoConverter.convert(foudApplication);
        return new Result(true, StatusCode.SUCCESS, "Find Success", applicationDto);
-    }
+    }*/
 
     @GetMapping
     public Result findAllVacancies(){
-        List<Application> applications = this.applicationService.findAll();
+        List<ApplicationDto> applications = this.applicationService.findAll();
         return new Result(true, StatusCode.SUCCESS, "Find All Success", applications);
     }
 

@@ -1,241 +1,156 @@
 package nl.andarabski.service;
 
-import nl.andarabski.dto.VacancyDto;
-import nl.andarabski.model.Application;
-import nl.andarabski.model.Vacancy;
+import nl.andarabski.converter.*;
+import nl.andarabski.dto.*;
+import nl.andarabski.model.*;
 import nl.andarabski.repository.VacancyRepository;
 import nl.andarabski.system.exception.ObjectNotFoundException;
-import nl.andarabski.utils.StubDataEntities;
-import org.junit.jupiter.api.BeforeEach;
+import nl.andarabski.testsupport.TD;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
-import org.mockito.InjectMocks;
-import org.mockito.Mock;
+import org.mockito.*;
 import org.mockito.junit.jupiter.MockitoExtension;
 
-import java.util.List;
-import java.util.Optional;
+import java.util.*;
 
-import static org.assertj.core.api.AssertionsForClassTypes.assertThat;
-import static org.assertj.core.api.ThrowableAssert.catchThrowable;
-import static org.junit.jupiter.api.Assertions.assertThrows;
-import static org.mockito.BDDMockito.given;
-import static org.mockito.Mockito.*;
-
+import static nl.andarabski.testsupport.TD.*;
+import static org.assertj.core.api.Assertions.*;
+import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
+import static org.mockito.BDDMockito.*;
 
 @ExtendWith(MockitoExtension.class)
 class VacancyServiceTest {
 
-    @Mock
-    private VacancyRepository vacancyRepository;
+    @Mock VacancyRepository vacancyRepository;
+    @Mock VacancyToVacancyDtoConverter vacancyToDto;
+    @Mock ApplicationToApplicationDtoConverter appToDto;
 
-    @InjectMocks
-    private VacancyService vacancyService;
-
-    List<Vacancy> listVacancies;
-    List<Application> listApplications;
-    StubDataEntities subData;
-
-    @BeforeEach
-    void setUp() {
-        subData = new StubDataEntities();
-
-        Vacancy vacancy1 = new Vacancy();
-        vacancy1.setTitle("Java Developer");
-        vacancy1.setDescription("Java Developer");
-        vacancy1.setLocation("Amsterdam");
-        vacancy1.setPostedAt(new java.util.Date());
-        vacancy1.setApplications(this.subData.getListApplications());
-
-        Vacancy vacancy2 = new Vacancy();
-        vacancy2.setTitle("Python Developer");
-        vacancy2.setDescription("Python Developer");
-        vacancy2.setLocation("Rotterdam");
-        vacancy2.setPostedAt(new java.util.Date());
-        vacancy2.setApplications(this.subData.getListApplications());
-
-        Vacancy vacancy3 = new Vacancy();
-        vacancy3.setTitle("C# Developer");
-        vacancy3.setDescription("C# Developer");
-        vacancy3.setLocation("Utrecht");
-        vacancy3.setPostedAt(new java.util.Date());
-        vacancy3.setApplications(this.subData.getListApplications());
-
-        this.listVacancies = new java.util.ArrayList<>();
-        this.listVacancies.add(vacancy1);
-        this.listVacancies.add(vacancy2);
-        this.listVacancies.add(vacancy3);
-    }
+    @InjectMocks VacancyService vacancyService;
 
     @Test
-    void testFindAllVacancies() {
-        // Given
-        given(this.vacancyRepository.findAll()).willReturn(this.listVacancies);
-        List<VacancyDto> actualVacancies = this.vacancyService.findAll();
+    void findById_mapsApplications() {
+        var v = vacancy(3L);
+        var u = user(1L);
+        var a1 = application(10L, u, v, ApplicationStatus.APPLIED, "ok");
+        var a2 = application(11L, u, v, ApplicationStatus.PENDING, "ok2");
 
-        // When
-        assertThat(actualVacancies.size()).isEqualTo(this.listVacancies.size());
+        given(vacancyRepository.findById(3L)).willReturn(Optional.of(v));
+        VacancyDto dto = vacancyDto(3L);
+        given(vacancyToDto.convert(v)).willReturn(dto);
+        given(appToDto.convert(a1)).willReturn(applicationDto(10L, 1L, 3L, "APPLIED", "ok"));
+        given(appToDto.convert(a2)).willReturn(applicationDto(11L, 1L, 3L, "PENDING", "ok2"));
 
-        // Then
-        verify(this.vacancyRepository, times(1)).findAll();
+        var out = vacancyService.findById(3L);
 
+        assertThat(out.getId()).isEqualTo(3L);
+        assertThat(out.getApplications()).hasSize(2);
+        assertThat(out.getPostedAt()).isEqualTo(FIXED_DATE);
+
+        verify(vacancyRepository).findById(3L);
+        verify(vacancyToDto).convert(v);
+        verify(appToDto, times(2)).convert(any(Application.class));
+        verifyNoMoreInteractions(vacancyRepository, vacancyToDto, appToDto);
     }
+
+    // 1) findById – not found
+    @Test
+    void findById_notFound_throws() {
+        given(vacancyRepository.findById(77L)).willReturn(Optional.empty());
+
+        assertThatThrownBy(() -> vacancyService.findById(77L))
+                .isInstanceOf(ObjectNotFoundException.class);
+
+        verify(vacancyRepository).findById(77L);
+        verifyNoMoreInteractions(vacancyRepository, vacancyToDto, appToDto);
+    }
+
+    // 2) findAll – twee items + mapping
+    @Test
+    void findAll_mapsTwoVacancies() {
+        var v1 = TD.vacancy(1L);
+        var v2 = TD.vacancy(2L);
+        given(vacancyRepository.findAll()).willReturn(List.of(v1, v2));
+
+        var d1 = TD.vacancyDto(1L);
+        var d2 = TD.vacancyDto(2L);
+        given(vacancyToDto.convert(v1)).willReturn(d1);
+        given(vacancyToDto.convert(v2)).willReturn(d2);
+
+        var out = vacancyService.findAll();
+
+        assertThat(out).extracting(VacancyDto::getId).containsExactly(1L, 2L);
+        verify(vacancyRepository).findAll();
+        verify(vacancyToDto, times(2)).convert(any(Vacancy.class));
+        verifyNoMoreInteractions(vacancyRepository, vacancyToDto);
+    }
+
+    // 3) save – id toekenning
+    @Test
+    void save_success_assignsId() {
+        var toSave = TD.vacancy(0L); toSave.setId(null);
+        given(vacancyRepository.save(any(Vacancy.class))).willAnswer(inv -> {
+            Vacancy x = inv.getArgument(0); x.setId(55L); return x;
+        });
+
+        var saved = vacancyService.save(toSave);
+
+        assertThat(saved.getId()).isEqualTo(55L);
+        verify(vacancyRepository).save(toSave);
+        verifyNoMoreInteractions(vacancyRepository);
+    }
+
+    // 4) update – success (incl. companyName verifiëren)
+    @Test
+    void update_success_mergesAllFields_includingCompanyName() {
+        var existing = TD.vacancy(3L);
+        var patch = new Vacancy();
+        patch.setTitle("Kotlin Dev");
+        patch.setCompanyName("Oracle");
+        patch.setDescription("desc");
+        patch.setLocation("Utrecht");
+        patch.setPostedAt(TD.FIXED_DATE);
+
+        given(vacancyRepository.findById(3L)).willReturn(Optional.of(existing));
+        given(vacancyRepository.save(any(Vacancy.class))).willAnswer(inv -> inv.getArgument(0));
+
+        var updated = vacancyService.update(3L, patch);
+
+        assertThat(updated.getTitle()).isEqualTo("Kotlin Dev");
+        assertThat(updated.getCompanyName()).isEqualTo("Oracle");
+        assertThat(updated.getDescription()).isEqualTo("desc");
+        assertThat(updated.getLocation()).isEqualTo("Utrecht");
+        assertThat(updated.getPostedAt()).isEqualTo(TD.FIXED_DATE);
+
+        InOrder io = inOrder(vacancyRepository);
+        io.verify(vacancyRepository).findById(3L);
+        io.verify(vacancyRepository).save(any(Vacancy.class));
+        io.verifyNoMoreInteractions();
+    }
+
+    // 5) delete – not found
+    @Test
+    void delete_notFound_throws() {
+        given(vacancyRepository.findById(99L)).willReturn(Optional.empty());
+
+        assertThatThrownBy(() -> vacancyService.delete(99L))
+                .isInstanceOf(ObjectNotFoundException.class);
+
+        verify(vacancyRepository).findById(99L);
+        verify(vacancyRepository, never()).deleteById(anyLong());
+        verifyNoMoreInteractions(vacancyRepository);
+    }
+
 
     @Test
-    void testFindByIdVacancySuccess() {
-        // Given
-        Vacancy vacancy1 = new Vacancy();
-        vacancy1.setTitle("Java Developer");
-        vacancy1.setDescription("Java Developer");
-        vacancy1.setLocation("Amsterdam");
-       // Date fixedDate = new Date();
+    void delete_success() {
+        var v = vacancy(5L);
+        given(vacancyRepository.findById(5L)).willReturn(Optional.of(v));
 
-        //vacancy1.setPostedAt(fixedDate);
-        vacancy1.setPostedAt(this.listVacancies.get(0).getPostedAt());
-        vacancy1.setApplications(this.subData.getListApplications());
-        given(this.vacancyRepository.findById(1L)).willReturn(java.util.Optional.of(this.listVacancies.get(0)));
+        assertDoesNotThrow(() -> vacancyService.delete(5L));
 
-        // When
-        VacancyDto returnVacancy = this.vacancyService.findById(1L);
-        assertThat(returnVacancy.getTitle()).isEqualTo(vacancy1.getTitle());
-        assertThat(returnVacancy.getDescription()).isEqualTo(vacancy1.getDescription());
-        assertThat(returnVacancy.getLocation()).isEqualTo(vacancy1.getLocation());
-        assertThat(returnVacancy.getPostedAt()).isCloseTo(vacancy1.getPostedAt(), 5);
-        assertThat(returnVacancy.getApplications()).isEqualTo(vacancy1.getApplications());
-
-        // Then
-        verify(this.vacancyRepository, times(1)).findById(1L);
-
+        InOrder io = inOrder(vacancyRepository);
+        io.verify(vacancyRepository).findById(5L);
+        io.verify(vacancyRepository).deleteById(5L);
+        io.verifyNoMoreInteractions();
     }
-
-    @Test
-    void testFindByIdVacancyNotFound() {
-        // Given
-        given(this.vacancyRepository.findById(1L)).willReturn(java.util.Optional.empty());
-        Throwable thrown = catchThrowable( () -> this.vacancyService.findById(1L));
-
-        // When
-        assertThat(thrown).isInstanceOf(ObjectNotFoundException.class);
-        assertThat(thrown).hasMessageContaining("Could not find Vacancy with Id: 1 :(");
-
-        // Then
-        verify(this.vacancyRepository, times(1)).findById(1L);
-
-    }
-
-    @Test
-    void testSaveVacancySucess() {
-        // Given
-        Vacancy vacancy1 = new Vacancy();
-        vacancy1.setTitle("Java Developer");
-        vacancy1.setDescription("Java Developer");
-        vacancy1.setLocation("Amsterdam");
-        vacancy1.setPostedAt(new java.util.Date());
-        vacancy1.setApplications(this.subData.getListApplications());
-
-        given((Vacancy) this.vacancyRepository.save(vacancy1)).willReturn(vacancy1);
-
-        // When
-        Vacancy returnVacancy = this.vacancyService.save(vacancy1);
-
-        // Then
-        assertThat(returnVacancy.getTitle()).isEqualTo(vacancy1.getTitle());
-        assertThat(returnVacancy.getDescription()).isEqualTo(vacancy1.getDescription());
-        assertThat(returnVacancy.getLocation()).isEqualTo(vacancy1.getLocation());
-        assertThat(returnVacancy.getPostedAt()).isCloseTo(vacancy1.getPostedAt(), 5);
-        assertThat(returnVacancy.getApplications()).isEqualTo(vacancy1.getApplications());
-        verify(this.vacancyRepository, times(1)).save(vacancy1);
-
-    }
-
-    @Test
-    void testpUdateVacancySuccsses() {
-        // Given
-        Vacancy oldVacancy = new Vacancy();
-        oldVacancy.setId(1L);
-        oldVacancy.setTitle("Python Developer");
-        oldVacancy.setDescription("Python Developer");
-        oldVacancy.setLocation("Rotterdam");
-        oldVacancy.setPostedAt(new java.util.Date());
-        oldVacancy.setApplications(this.subData.getListApplications());
-
-        Vacancy update = new Vacancy();
-        update.setTitle("Python Developer Update");
-        update.setDescription("Python Developer Update");
-        update.setLocation("Rotterdam Update");
-        update.setPostedAt(new java.util.Date());
-        update.setApplications(this.subData.getListApplications());
-
-        given(this.vacancyRepository.findById(1l)).willReturn(Optional.of(oldVacancy));
-        given(this.vacancyRepository.save(oldVacancy)).willReturn(oldVacancy);
-
-        // When
-        Vacancy updatedVacancy = this.vacancyService.update(1L, update);
-        assertThat(updatedVacancy.getId()).isEqualTo(1L);
-        assertThat(updatedVacancy.getTitle()).isEqualTo(update.getTitle());
-        assertThat(updatedVacancy.getDescription()).isEqualTo(update.getDescription());
-        assertThat(updatedVacancy.getLocation()).isEqualTo(update.getLocation());
-        assertThat(updatedVacancy.getPostedAt()).isCloseTo(update.getPostedAt(), 5);
-        assertThat(updatedVacancy.getApplications()).isEqualTo(update.getApplications());
-
-        // Then
-        verify(this.vacancyRepository, times(1)).findById(1L);
-        verify(this.vacancyRepository, times(1)).save(oldVacancy);
-
-    }
-
-    @Test
-    void testpUdateVacancyNotFound() {
-        // Given
-        Vacancy update = new Vacancy();
-        update.setTitle("Python Developer Update");
-        update.setDescription("Python Developer Update");
-        update.setLocation("Rotterdam Update");
-        update.setPostedAt(new java.util.Date());
-        update.setApplications(this.subData.getListApplications());
-
-        given(this.vacancyRepository.findById(1l)).willReturn(java.util.Optional.empty());
-
-        // When
-        assertThrows(ObjectNotFoundException.class, () -> vacancyService.update(1L, update));
-
-        // Then
-        verify(this.vacancyRepository, times(1)).findById(1L);
-
-    }
-
-    @Test
-    void testDeleteVacancySuccess() {
-        // Given
-        Vacancy vacancy = new Vacancy();
-        vacancy.setTitle("Python Developer");
-        vacancy.setDescription("Python Developer");
-        vacancy.setLocation("Rotterdam");
-        vacancy.setPostedAt(new java.util.Date());
-        vacancy.setApplications(this.subData.getListApplications());
-
-        given(this.vacancyRepository.findById(1L)).willReturn(java.util.Optional.of(vacancy));
-        doNothing().when(this.vacancyRepository).deleteById(1l);
-
-        // When
-        this.vacancyService.delete(1l);
-
-        // Then
-        verify(this.vacancyRepository, times(1)).deleteById(1l);
-
-    }
-
-    @Test
-    void testDeleteVacancyNotFound() {
-        // Given
-        given(this.vacancyRepository.findById(1L)).willReturn(java.util.Optional.empty());
-
-        // When
-        assertThrows(ObjectNotFoundException.class, () -> vacancyService.delete(1L));
-
-        // Then
-        verify(this.vacancyRepository, times(1)).findById(1L);
-
-    }
-
 }

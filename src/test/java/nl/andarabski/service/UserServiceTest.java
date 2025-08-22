@@ -1,309 +1,181 @@
 package nl.andarabski.service;
 
-import nl.andarabski.converter.ApplicationDtoToApplicationConverter;
-import nl.andarabski.converter.ApplicationToApplicationDtoConverter;
-import nl.andarabski.converter.UserDtoToUserConverter;
-import nl.andarabski.converter.UserToUserDtoConverter;
-import nl.andarabski.dto.ApplicationDto;
-import nl.andarabski.dto.UserDto;
-import nl.andarabski.model.Application;
-import nl.andarabski.model.ApplicationStatus;
-import nl.andarabski.model.User;
+import nl.andarabski.converter.*;
+import nl.andarabski.dto.*;
+import nl.andarabski.model.*;
 import nl.andarabski.repository.UserRepository;
-import nl.andarabski.repository.VacancyRepository;
 import nl.andarabski.system.exception.ObjectNotFoundException;
-import nl.andarabski.utils.StubDataEntities;
-import org.junit.jupiter.api.BeforeEach;
+import nl.andarabski.testsupport.TD;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
-import org.mockito.InjectMocks;
-import org.mockito.Mock;
-import org.mockito.Mockito;
-import org.mockito.Spy;
+import org.mockito.*;
 import org.mockito.junit.jupiter.MockitoExtension;
-import org.modelmapper.ModelMapper;
-import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.boot.test.context.SpringBootTest;
-import org.springframework.test.context.bean.override.mockito.MockitoBean;
 
-import java.util.ArrayList;
-import java.util.List;
-import java.util.Optional;
+import java.util.*;
 
-import static org.assertj.core.api.Assertions.assertThat;
-import static org.assertj.core.api.Assertions.catchThrowable;
-import static org.junit.jupiter.api.Assertions.assertThrows;
-import static org.mockito.BDDMockito.given;
-import static org.mockito.Mockito.*;
-
+import static nl.andarabski.testsupport.TD.*;
+import static org.assertj.core.api.Assertions.*;
+import static org.mockito.BDDMockito.*;
 
 @ExtendWith(MockitoExtension.class)
-public class UserServiceTest {
+class UserServiceTest {
 
-    @Mock private UserRepository userRepository;
+    @Mock UserRepository userRepository;
+    @Mock UserToUserDtoConverter userToDto;
+    @Mock ApplicationToApplicationDtoConverter appToDto;
+    @Mock UserDtoToUserConverter dtoToUser; // alleen nodig als je service 'm gebruikt
 
-    // mock de converters die UserService gebruikt
-    @Mock private UserToUserDtoConverter userConverter;
-    @Mock private UserDtoToUserConverter userDtoConverter;
-    @Mock private ApplicationToApplicationDtoConverter appConverter;
+    @InjectMocks UserService userService;
 
-    @InjectMocks
-    private UserService userService;
+    @Test
+    void findAll_mapsUsers() {
+        var u1 = user(1L); var u2 = user(2L);
+        given(userRepository.findAll()).willReturn(List.of(u1, u2));
+        given(userToDto.convert(u1)).willReturn(userDto(1L));
+        given(userToDto.convert(u2)).willReturn(userDto(2L));
 
-    private StubDataEntities subData;
-    private List<User> users;
+        var out = userService.findAll();
 
+        assertThat(out).extracting(UserDto::getId).containsExactly(1L, 2L);
+        verify(userRepository).findAll();
+        verify(userToDto, times(2)).convert(any(User.class));
+        verifyNoMoreInteractions(userRepository, userToDto);
+    }
 
-    @BeforeEach
-    void setUp() {
+    @Test
+    void findById_includesApplications() {
+        var u = user(1L);
+        var v = vacancy(3L);
+        var a1 = application(10L, u, v, ApplicationStatus.APPLIED, "ok");
+        var a2 = application(11L, u, v, ApplicationStatus.PENDING, "ok2");
+        given(userRepository.findById(1L)).willReturn(Optional.of(u));
 
-        subData = new StubDataEntities();
+        var dto = userDto(1L);
+        given(userToDto.convert(u)).willReturn(dto);
+        given(appToDto.convert(a1)).willReturn(applicationDto(10L, 1L, 3L, "APPLIED", "ok"));
+        given(appToDto.convert(a2)).willReturn(applicationDto(11L, 1L, 3L, "PENDING", "ok2"));
 
-        // generieke stub: kopieer de velden die je in de assertions gebruikt
-        lenient().when(userConverter.convert(any(User.class))).thenAnswer(inv -> {
-            User u = inv.getArgument(0);
-            UserDto d = new UserDto();
-            d.setId(u.getId());
-            d.setFirstName(u.getFirstName());
-            d.setLastName(u.getLastName());
-            d.setEmail(u.getEmail());
-            d.setPassword(u.getPassword());
-            d.setRole(u.getRole());
-            d.setEnabled(u.isEnabled());
-            // applicaties worden hieronder door appConverter gezet
-            return d;
+        var out = userService.findById(1L);
+
+        assertThat(out.getId()).isEqualTo(1L);
+        assertThat(out.getApplications()).hasSize(2);
+        verify(userRepository).findById(1L);
+        verify(userToDto).convert(u);
+        verify(appToDto, times(2)).convert(any(Application.class));
+    }
+
+    // 1) findById – not found
+    @Test
+    void findById_notFound_throws() {
+        given(userRepository.findById(99L)).willReturn(Optional.empty());
+
+        assertThatThrownBy(() -> userService.findById(99L))
+                .isInstanceOf(ObjectNotFoundException.class);
+
+        verify(userRepository).findById(99L);
+        verifyNoMoreInteractions(userRepository, userToDto, appToDto);
+    }
+
+    // 2) findAll – empty → no mapping
+    @Test
+    void findAll_empty_returnsEmptyAndNoMapping() {
+        given(userRepository.findAll()).willReturn(List.of());
+
+        var out = userService.findAll();
+
+        assertThat(out).isEmpty();
+        verify(userRepository).findAll();
+        verify(userToDto, never()).convert(any());
+        verifyNoMoreInteractions(userRepository, userToDto);
+    }
+
+    // 3) save – repo save + id terug
+    @Test
+    void save_success_assignsIdAndReturnsEntity() {
+        var u = TD.user(0L); u.setId(null); // nieuw
+        given(userRepository.save(any(User.class))).willAnswer(inv -> {
+            User x = inv.getArgument(0); x.setId(7L); return x;
         });
 
-        // applicatie-conversie; meestal controleren tests hooguit de grootte/ids
-        lenient().when(appConverter.convert(any(Application.class))).thenAnswer(inv -> {
-            Application a = inv.getArgument(0);
-            ApplicationDto d = new ApplicationDto();
-            d.setId(a.getId());
-            d.setMotivation(a.getMotivation());
-            d.setStatus(a.getStatus() == null ? null : a.getStatus().name()); // <-- hier
-            d.setAppliedAt(a.getAppliedAt());
-            return d;
-        });
+        var saved = userService.save(u);
 
-
-        User user1 = new User();
-        user1.setFirstName("Andre");
-        user1.setLastName("Dabski");
-        user1.setEmail("test@gmail.com");
-        user1.setPassword("12345");
-        user1.setRole("admin");
-        user1.setEnabled(true);
-        user1.setApplications(this.subData.getListApplications());
-
-        User user2 = new User();
-        user2.setFirstName("John");
-        user2.setLastName("Johnson");
-        user2.setEmail("test@gmail.com");
-        user2.setPassword("54321");
-        user2.setRole("admin user");
-        user2.setEnabled(true);
-        user2.setApplications(this.subData.getListApplications());
-
-        User user3 = new User();
-        user3.setFirstName("Sonny");
-        user3.setLastName("Andarabski");
-        user3.setEmail("test@gmail.com");
-        user3.setPassword("12345");
-        user3.setRole("user");
-        user3.setEnabled(true);
-        user3.setApplications(this.subData.getListApplications());
-
-        this.users = new ArrayList();
-        this.users.add(user1);
-        this.users.add(user2);
-        this.users.add(user3);
+        assertThat(saved.getId()).isEqualTo(7L);
+        verify(userRepository).save(u);
+        verifyNoMoreInteractions(userRepository);
     }
+
+    // 4) update – success, velden gemerged
+    @Test
+    void update_success_mergesAllFields() {
+        var existing = TD.user(1L);
+        var patch = new User();
+        patch.setFirstName("New");
+        patch.setLastName("Name");
+        patch.setEmail("new@mail.com");
+        patch.setPassword("secret");
+        patch.setRole("user");
+        patch.setEnabled(false);
+
+        given(userRepository.findById(1L)).willReturn(Optional.of(existing));
+        given(userRepository.save(any(User.class))).willAnswer(inv -> inv.getArgument(0));
+
+        var updated = userService.update(1L, patch);
+
+        assertThat(updated.getFirstName()).isEqualTo("New");
+        assertThat(updated.getLastName()).isEqualTo("Name");
+        assertThat(updated.getEmail()).isEqualTo("new@mail.com");
+        assertThat(updated.getPassword()).isEqualTo("secret");
+        assertThat(updated.getRole()).isEqualTo("user");
+        assertThat(updated.isEnabled()).isFalse();
+
+        InOrder io = inOrder(userRepository);
+        io.verify(userRepository).findById(1L);
+        io.verify(userRepository).save(any(User.class));
+        io.verifyNoMoreInteractions();
+    }
+
+    // 5) update – not found
+    @Test
+    void update_notFound_throws() {
+        given(userRepository.findById(9L)).willReturn(Optional.empty());
+
+        assertThatThrownBy(() -> userService.update(9L, new User()))
+                .isInstanceOf(ObjectNotFoundException.class);
+
+        verify(userRepository).findById(9L);
+        verify(userRepository, never()).save(any());
+        verifyNoMoreInteractions(userRepository);
+    }
+
+    // 6) findById – null applications → lege lijst
+    @Test
+    void findById_nullApplications_yieldsEmptyListInDto() {
+        var u = TD.user(1L);
+        u.setApplications(null); // edge case
+        given(userRepository.findById(1L)).willReturn(Optional.of(u));
+
+        var dto = TD.userDto(1L);
+        given(userToDto.convert(u)).willReturn(dto);
+
+        var out = userService.findById(1L);
+
+        assertThat(out.getApplications()).isNotNull().isEmpty();
+        verify(userRepository).findById(1L);
+        verify(userToDto).convert(u);
+        verify(appToDto, never()).convert(any());
+    }
+
 
     @Test
-    public void findAllUsers() {
-        given(this.userRepository.findAll()).willReturn(this.users);
-        List<UserDto> actualUsers = this.userService.findAll();
-        assertThat(actualUsers.size()).isEqualTo(this.users.size());
-        verify(this.userRepository, times(1)).findAll();
+    void delete_success() {
+        var u = user(1L);
+        given(userRepository.findById(1L)).willReturn(Optional.of(u));
+
+        userService.delete(1L);
+
+        InOrder io = inOrder(userRepository);
+        io.verify(userRepository).findById(1L);
+        io.verify(userRepository).deleteById(1L);
+        io.verifyNoMoreInteractions();
     }
-
-    @Test
-    void testFindByIdSuccess() {
-        User user1 = new User();
-        user1.setFirstName("Andre");
-        user1.setLastName("Dabski");
-        user1.setEmail("test@gmail.com");
-        user1.setPassword("12345");
-        user1.setRole("admin");
-        user1.setEnabled(true);
-        user1.setApplications(this.subData.getListApplications());
-        given(this.userRepository.findById(1L)).willReturn(Optional.of(user1));
-
-        UserDto returnUser = this.userService.findById(1L);
-
-        assertThat(returnUser.getId()).isEqualTo(user1.getId());
-        assertThat(returnUser.getFirstName()).isEqualTo(user1.getFirstName());
-        assertThat(returnUser.getLastName()).isEqualTo(user1.getLastName());
-        assertThat(returnUser.getEmail()).isEqualTo(user1.getEmail());
-        assertThat(returnUser.getPassword()).isEqualTo(user1.getPassword());
-        assertThat(returnUser.getRole()).isEqualTo(user1.getRole());
-
-        assertThat(returnUser.getApplications()).hasSameSizeAs(user1.getApplications());
-        for (int i = 0; i < user1.getApplications().size(); i++) {
-            String expectedStatus = user1.getApplications().get(i).getStatus() == null
-                    ? null
-                    : user1.getApplications().get(i).getStatus().name();
-
-            assertThat(returnUser.getApplications().get(i).getStatus())
-                    .isEqualTo(expectedStatus);
-           // assertThat(returnUser.getApplications().get(i).getStatus()).isEqualTo("APPLIED");
-
-
-            assertThat(returnUser.getApplications().get(i).getMotivation())
-                    .isEqualTo(user1.getApplications().get(i).getMotivation());
-            assertThat(returnUser.getApplications().get(i).getAppliedAt())
-                    .isEqualTo(user1.getApplications().get(i).getAppliedAt());
-        }
-
-
-        verify(this.userRepository, times(1)).findById(1L);
-    }
-
-    @Test
-    void testFindByIdNotFound() {
-        given(this.userRepository.findById(1L)).willReturn(Optional.empty());
-        Throwable thrown = catchThrowable(() -> this.userService.findById(1L));
-        assertThat(thrown).isInstanceOf(ObjectNotFoundException.class);
-        assertThat(thrown).hasMessageContaining("Could not find User with Id: 1 :(");
-        verify(this.userRepository, times(1)).findById(1L);
-    }
-
-    @Test
-    void testSaveSuccess() {
-        User user1 = new User();
-        user1.setFirstName("Andre");
-        user1.setLastName("Dabski");
-        user1.setEmail("test@gmail.com");
-        user1.setPassword("12345");
-        user1.setRole("admin");
-        user1.setEnabled(true);
-        user1.setApplications(this.subData.getListApplications());
-
-        given((User) this.userRepository.save(user1)).willReturn(user1);
-
-        User returnUser = this.userService.save(user1);
-        assertThat(returnUser.getId()).isEqualTo(user1.getId());
-        assertThat(returnUser.getFirstName()).isEqualTo(user1.getFirstName());
-        assertThat(returnUser.getLastName()).isEqualTo(user1.getLastName());
-        assertThat(returnUser.getEmail()).isEqualTo(user1.getEmail());
-        assertThat(returnUser.getPassword()).isEqualTo(user1.getPassword());
-        assertThat(returnUser.getRole()).isEqualTo(user1.getRole());
-        assertThat(returnUser.getApplications()).isEqualTo(user1.getApplications());
-
-        verify(this.userRepository, times(1)).save(user1);
-    }
-
-    @Test
-    void testUdateSuccess() {
-        User oldUser = new User();
-        oldUser.setId(1L);
-        oldUser.setFirstName("Andre");
-        oldUser.setLastName("Dabski");
-        oldUser.setEmail("test@gmail.com");
-        oldUser.setPassword("12345");
-        oldUser.setRole("admin");
-        oldUser.setEnabled(true);
-        oldUser.setApplications(this.subData.getListApplications());
-
-
-        User update = new User();
-        update.setFirstName("Kiki updated");
-        update.setLastName("MyKiki updated");
-        update.setEmail("test@gmail.com");
-        update.setPassword("12345");
-        update.setRole("admin");
-        update.setEnabled(true);
-        update.setApplications(this.subData.getListApplications());
-
-        given(this.userRepository.save(oldUser)).willReturn(oldUser);
-        given(this.userRepository.findById(1L)).willReturn(Optional.of(oldUser));
-
-        User updatedUser = this.userService.update(1L, update);
-
-        assertThat(updatedUser.getId()).isEqualTo(1L);
-        assertThat(updatedUser.getFirstName()).isEqualTo(update.getFirstName());
-        assertThat(updatedUser.getLastName()).isEqualTo(update.getLastName());
-        assertThat(updatedUser.getEmail()).isEqualTo(update.getEmail());
-        assertThat(updatedUser.getPassword()).isEqualTo(update.getPassword());
-        assertThat(updatedUser.getRole()).isEqualTo(update.getRole());
-        assertThat(updatedUser.getApplications()).isEqualTo(update.getApplications());
-
-        verify(this.userRepository, times(1)).findById(1L);
-        verify(this.userRepository, times(1)).save(oldUser);
-    }
-
-    @Test
-    void testUpdateNotFoud() {
-        User user = new User();
-        user.setFirstName("John");
-        user.setLastName("Doe");
-        user.setEmail("<EMAIL>");
-        user.setPassword("<PASSWORD>");
-        user.setRole("admin");
-        user.setEnabled(true);
-        user.setApplications(this.subData.getListApplications());
-
-        given(this.userRepository.findById(1L)).willReturn(Optional.empty());
-
-        assertThrows(ObjectNotFoundException.class, () -> this.userService.update(1L, user));
-        verify(this.userRepository, times(1)).findById(1L);
-    }
-
-    @Test
-    void testDeleteSuccess() {
-        // Given
-        User user = new User();
-        user.setId(1L);
-        user.setFirstName("John");
-        user.setLastName("Doe");
-        user.setEmail("<EMAIL>");
-        user.setPassword("<PASSWORD>");
-        user.setRole("admin");
-        user.setEnabled(true);
-        user.setApplications(this.subData.getListApplications());
-
-        given(this.userRepository.findById(Mockito.anyLong())).willReturn(Optional.of(user));
-        doNothing().when(this.userRepository).deleteById(1L);
-
-        // When
-        this.userService.delete(user.getId());
-
-        // Then
-        verify(this.userRepository, times(1)).deleteById(user.getId());
-
-    }
-
-    @Test
-    void testDeleteNotFound() {
-        // Given
-        given(this.userRepository.findById(Mockito.anyLong())).willReturn(Optional.empty());
-
-        // When
-        assertThrows(ObjectNotFoundException.class, () -> this.userService.delete(1L));
-
-        // Then
-        verify(this.userRepository, times(1)).findById(1L);
-    }
-
-    private static List<ApplicationDto> toExpectedDtos(List<Application> apps) {
-        return apps.stream().map(a -> {
-            ApplicationDto d = new ApplicationDto();
-            d.setId(a.getId());
-            d.setMotivation(a.getMotivation());
-            d.setStatus(a.getStatus() == null ? null : a.getStatus().name());
-            d.setAppliedAt(a.getAppliedAt());
-            return d;
-        }).toList();
-    }
-
 }

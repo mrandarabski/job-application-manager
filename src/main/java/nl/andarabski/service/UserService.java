@@ -106,6 +106,33 @@ public class UserService {
     }
 
     private UserDto toDto(User user) {
+        // Fail-fast als iemand de service zonder converter probeert te gebruiken
+        Objects.requireNonNull(userConverter, "userConverter is not injected");
+        Objects.requireNonNull(appConverter,   "appConverter is not injected");
+
+        UserDto dto = userConverter.convert(user);
+
+        List<ApplicationDto> appDtos = Optional.ofNullable(user.getApplications())
+                .orElseGet(List::of)
+                .stream()
+                .sorted(
+                        Comparator.comparing(
+                                        Application::getAppliedAt,
+                                        Comparator.nullsLast(Comparator.naturalOrder())) // duidelijker dan Date::compareTo
+                                .thenComparing(
+                                        Application::getId,
+                                        Comparator.nullsLast(Comparator.naturalOrder()))  // duidelijker dan Long::compareTo
+                )
+                .map(appConverter::convert)
+                .filter(Objects::nonNull) // voorkom null-elementen als de converter ooit null teruggeeft
+                .toList();
+
+        dto.setApplications(appDtos);
+        return dto;
+    }
+
+
+   /* private UserDto toDto(User user) {
         UserDto dto = userConverter.convert(user);
         var apps = user.getApplications();
         if (apps == null) { dto.setApplications(List.of()); return dto; }
@@ -117,7 +144,7 @@ public class UserService {
                 .toList();
         dto.setApplications(appDtos);
         return dto;
-    }
+    }*/
 
     // ===== helper =====
    /* private UserDto toDto(User user) {

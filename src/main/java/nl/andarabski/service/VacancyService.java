@@ -14,10 +14,7 @@ import nl.andarabski.repository.VacancyRepository;
 import nl.andarabski.system.exception.ObjectNotFoundException;
 import org.springframework.stereotype.Service;
 
-import java.util.ArrayList;
-import java.util.Comparator;
-import java.util.Date;
-import java.util.List;
+import java.util.*;
 import java.util.stream.Collectors;
 
 @Service
@@ -28,16 +25,16 @@ public class VacancyService {
     private final ApplicationService applicationService;
     private final VacancyRepository vacancyRepository;
     private final ApplicationRepository applicationRepository;
-    private final VacancyToVacancyDtoConverter vacancyToVacancyDtoConverter;
+    private final VacancyToVacancyDtoConverter toVacancyDtoConverter;
     private final ApplicationToApplicationDtoConverter appConverter;
 
     public VacancyService(UserService userService, ApplicationService applicationService,
-                          VacancyRepository vacancyRepository, ApplicationRepository applicationRepository, VacancyMapper vacancyMapper, VacancyToVacancyDtoConverter vacancyToVacancyDtoConverter, ApplicationToApplicationDtoConverter appConverter) {
+                          VacancyRepository vacancyRepository, ApplicationRepository applicationRepository, VacancyMapper vacancyMapper, VacancyToVacancyDtoConverter toVacancyDtoConverter, ApplicationToApplicationDtoConverter appConverter) {
         this.userService = userService;
         this.applicationService = applicationService;
         this.vacancyRepository = vacancyRepository;
         this.applicationRepository = applicationRepository;
-        this.vacancyToVacancyDtoConverter = vacancyToVacancyDtoConverter;
+        this.toVacancyDtoConverter = toVacancyDtoConverter;
         this.appConverter = appConverter;
     }
 
@@ -71,6 +68,7 @@ public class VacancyService {
         return this.vacancyRepository.findById(vacancyId)
                 .map(oldVacancy -> {
                     oldVacancy.setTitle(createNewVacancy.getTitle());
+                    oldVacancy.setCompanyName(createNewVacancy.getCompanyName());
                     oldVacancy.setDescription(createNewVacancy.getDescription());
                     oldVacancy.setLocation(createNewVacancy.getLocation());
                     oldVacancy.setPostedAt(createNewVacancy.getPostedAt());
@@ -88,6 +86,33 @@ public class VacancyService {
     }
 
     private VacancyDto toDto(Vacancy vacancy){
+        // Fail-fast als iemand de service zonder converter probeert te gebruiken
+        Objects.requireNonNull(toVacancyDtoConverter, "toVacancyDtoConverter is not injected");
+        Objects.requireNonNull(appConverter,   "appConverter is not injected");
+
+        VacancyDto dto = toVacancyDtoConverter.convert(vacancy);
+
+        List<ApplicationDto> appDtos = Optional.ofNullable(vacancy.getApplications())
+                .orElseGet(List::of)
+                .stream()
+                .sorted(
+                        Comparator.comparing(
+                                        Application::getAppliedAt,
+                                        Comparator.nullsLast(Comparator.naturalOrder())) // duidelijker dan Date::compareTo
+                                .thenComparing(
+                                        Application::getId,
+                                        Comparator.nullsLast(Comparator.naturalOrder()))  // duidelijker dan Long::compareTo
+                )
+                .map(appConverter::convert)
+                .filter(Objects::nonNull) // voorkom null-elementen als de converter ooit null teruggeeft
+                .toList();
+
+        dto.setApplications(appDtos);
+        return dto;
+    }
+
+    /*
+    private VacancyDto toDto(Vacancy vacancy){
         VacancyDto dto = vacancyToVacancyDtoConverter.convert(vacancy);
         var apps = vacancy.getApplications();
         if(apps != null) {
@@ -104,5 +129,6 @@ public class VacancyService {
         return dto;
 
     }
+     */
 
 }
