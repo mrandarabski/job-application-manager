@@ -23,7 +23,7 @@ class UserServiceTest {
     @Mock UserRepository userRepository;
     @Mock UserToUserDtoConverter userToDto;
     @Mock ApplicationToApplicationDtoConverter appToDto;
-    @Mock UserDtoToUserConverter dtoToUser; // alleen nodig als je service 'm gebruikt
+
 
     @InjectMocks UserService userService;
 

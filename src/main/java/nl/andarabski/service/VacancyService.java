@@ -2,7 +2,6 @@ package nl.andarabski.service;
 
 import jakarta.transaction.Transactional;
 import nl.andarabski.converter.ApplicationToApplicationDtoConverter;
-import nl.andarabski.converter.UserToUserDtoConverter;
 import nl.andarabski.converter.VacancyToVacancyDtoConverter;
 import nl.andarabski.dto.ApplicationDto;
 import nl.andarabski.dto.VacancyDto;
@@ -15,7 +14,6 @@ import nl.andarabski.system.exception.ObjectNotFoundException;
 import org.springframework.stereotype.Service;
 
 import java.util.*;
-import java.util.stream.Collectors;
 
 @Service
 @Transactional

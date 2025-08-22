@@ -35,7 +35,7 @@ public class ApplicationController {
         this.applicationDtoToApplicationConverter = applicationDtoToApplicationConverter;
     }
 
-   /* @GetMapping("/{applicationId}")
+/*    @GetMapping("/{applicationId}")
     public Result findById(@PathVariable Long applicationId){
         Application foudApplication = this.applicationService.findById(applicationId);
         ApplicationDto applicationDto = this.applicationToApplicationDtoConverter.convert(foudApplication);
