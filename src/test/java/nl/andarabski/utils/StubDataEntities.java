@@ -30,6 +30,7 @@ public class StubDataEntities {
         mockUser.setEnabled(true);
 
         Vacancy mockVacancy = new Vacancy();
+        mockVacancy.setId(1l);
         mockVacancy.setTitle("Java Developer");
         mockVacancy.setCompanyName("IBM");
         mockVacancy.setDescription("Looking for a skilled Java developer.");

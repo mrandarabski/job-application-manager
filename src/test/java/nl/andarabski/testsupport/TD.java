@@ -14,20 +14,23 @@ public final class TD {
 
     // ---------- ENTITIES ----------
 
-    public static User user(long id) {
+    public static User user(Long id) {
         User u = new User();
         u.setId(id);
-        u.setFirstName("Andre");
-        u.setLastName("Dabski");
-        u.setEmail("test+" + id + "@gmail.com");
+        u.setFirstName("LvGod");
+        u.setLastName("Andarabski");
+        u.setEmail("test@gmail.com");
         u.setPassword("secret");
+        u.setAge(23);
+        u.setPhoto("photo");
+        u.setCv("doc.pdf");
         u.setRole("admin");
         u.setEnabled(true);
         u.setApplications(new ArrayList<>());
         return u;
     }
 
-    public static Vacancy vacancy(long id) {
+    public static Vacancy vacancy(Long id) {
         Vacancy v = new Vacancy();
         v.setId(id);
         v.setTitle("Java Developer");
@@ -39,7 +42,7 @@ public final class TD {
         return v;
     }
 
-    public static Application application(long id, User user, Vacancy vacancy,
+    public static Application application(Long id, User user, Vacancy vacancy,
                                           ApplicationStatus status, String motivation) {
         Application a = new Application();
         a.setId(id);
@@ -62,23 +65,27 @@ public final class TD {
 
     // ---------- DTOS ----------
 
-    public static UserDto userDto(long id) {
+    public static UserDto userDto(Long id) {
         UserDto d = new UserDto();
         d.setId(id);
         d.setFirstName("Andre");
         d.setLastName("Dabski");
-        d.setEmail("test+" + id + "@gmail.com");
+        d.setEmail("test@gmail.com");
         d.setPassword("secret");
+        d.setAge(23);
+        d.setPhoto("photo");
+        d.setCv("doc.pdf");
         d.setRole("admin");
+        d.setEnabled(true);
         d.setApplications(new ArrayList<>());
         return d;
     }
 
-    public static VacancyDto vacancyDto(long id) {
+    public static VacancyDto vacancyDto(Long id) {
         VacancyDto d = new VacancyDto();
         d.setId(id);
         d.setTitle("Java Developer");
-        d.setCompanyName("Acme");
+        d.setCompanyName("IBM Company");
         d.setDescription("We are looking for an experienced Java Developer");
         d.setLocation("Amsterdam");
         d.setPostedAt(FIXED_DATE);
@@ -86,7 +93,7 @@ public final class TD {
         return d;
     }
 
-    public static ApplicationDto applicationDto(long id, long userId, long vacancyId,
+    public static ApplicationDto applicationDto(Long id, Long userId, Long vacancyId,
                                                 String status, String motivation) {
         ApplicationDto d = new ApplicationDto();
         d.setId(id);

@@ -8,14 +8,15 @@ import java.util.Date;
 import java.util.Objects;
 
 @Entity
-@Table(name = "application")  // geen conflict, maar maakt het consistent
+@Table(name = "application",
+        uniqueConstraints = @UniqueConstraint(columnNames = {"user_id", "vacancy_id"}))  // geen conflict, maar maakt het consistent
 public class Application implements Serializable {
 
     @Id
     @GeneratedValue(strategy = GenerationType.AUTO)
     private Long id;
     @ManyToOne(fetch = FetchType.LAZY)
-  //  @JoinColumn(name = "user_id")
+    @JoinColumn(name = "user_id", nullable = false)
     @JsonBackReference(value = "user-applications")
     private User user;
     @ManyToOne(fetch = FetchType.LAZY)

@@ -29,7 +29,7 @@ public class User implements Serializable {
     private String role;
     private boolean enabled;
 
-    @OneToMany(mappedBy = "user", cascade = CascadeType.ALL, fetch = FetchType.LAZY)
+    @OneToMany(mappedBy = "user", cascade = CascadeType.ALL, orphanRemoval = true, fetch = FetchType.LAZY)
     @JsonManagedReference(value = "user-applications")
     //@JsonManagedReference
     private List<Application> applications;
@@ -140,12 +140,12 @@ public class User implements Serializable {
     }
 
     public void addApplication(Application application) {
-        application.setUser(this);
         applications.add(application);
+        application.setUser(this);
     }
     public void removeApplication(Application applicationTeBeRemoved) {
+       applications.remove(applicationTeBeRemoved);
         applicationTeBeRemoved.setUser(null);
-        this.applications.remove(applicationTeBeRemoved);
 
     }
     public void removeAllApplications() {

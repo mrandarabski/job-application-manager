@@ -2,10 +2,12 @@ package nl.andarabski.controller;
 
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import lombok.RequiredArgsConstructor;
 import nl.andarabski.converter.UserDtoToUserConverter;
 import nl.andarabski.converter.UserToUserDtoConverter;
 import nl.andarabski.dto.ApplicationDto;
 import nl.andarabski.dto.UserDto;
+import nl.andarabski.mapper.UserMapper;
 import nl.andarabski.model.User;
 import nl.andarabski.service.UserService;
 import nl.andarabski.system.Result;
@@ -23,26 +25,21 @@ import java.io.IOException;
 import java.util.Collections;
 import java.util.List;
 
+@RequiredArgsConstructor
 @RestController
+//@RequestMapping("${api.endpoint.base-url}/applications")
 @RequestMapping("${api.endpoint.base-url}/users")
 public class UserController {
 
     private final UserService userService;
-    private final UserDtoToUserConverter userDtoToUserConverter;
-    private final UserToUserDtoConverter userToUserDtoConverter;
-
-    @Autowired
-    public UserController(UserService userService,
-                          UserDtoToUserConverter userDtoToUserConverter,
-                          UserToUserDtoConverter userToUserDtoConverter) {
-        this.userService = userService;
-        this.userDtoToUserConverter = userDtoToUserConverter;
-        this.userToUserDtoConverter = userToUserDtoConverter;
-    }
+    private final UserMapper userMapper;
 
     @GetMapping("/{id}")
     public Result findUserById(@PathVariable Long id) {
         UserDto dto = userService.findById(id);
+        if (dto == null) {
+            throw new ObjectNotFoundException("User with id " + id + " not found");
+        }
         return new Result(true, StatusCode.SUCCESS, "Find One Success", dto);
     }
 
@@ -53,26 +50,25 @@ public class UserController {
     }
 
     @ResponseStatus(HttpStatus.CREATED)
-    @PostMapping(value = "/add", produces = MediaType.APPLICATION_JSON_VALUE,
-            consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
-    public Result createUser(@RequestParam String firstName,
-                             @RequestParam String lastName,
-                             @RequestParam String email,
-                             @RequestParam String password,
-                             @RequestParam int age,
-                             @RequestParam String role,
-                             @RequestParam boolean enabled,
-                             @RequestParam(value = "photo", required = false) MultipartFile photo,
-                             @RequestParam(value = "cv", required = false) MultipartFile cv,
-                             @RequestParam("applications") String applicationsJson) throws IOException {
+    @PostMapping(value="/add", consumes=MediaType.MULTIPART_FORM_DATA_VALUE, produces=MediaType.APPLICATION_JSON_VALUE)
+    public ResponseEntity<Result> createUser(
+            @RequestParam String firstName,
+            @RequestParam String lastName,
+            @RequestParam String email,
+            @RequestParam String password,
+            @RequestParam int age,
+            @RequestParam String role,
+            @RequestParam boolean enabled,
+            @RequestParam(value="photo", required=false) MultipartFile photo,
+            @RequestParam(value="cv", required=false) MultipartFile cv,
+            @RequestParam(value="applications", required=false) String applicationsJson
+    ) throws IOException {
 
-        // Specifiek voor de test: geen 'photo' => 404
         if (photo == null || photo.isEmpty()) {
-            // De test checkt alleen de HTTP-status (404), niet de body/message.
-            throw new ObjectNotFoundException("photo", (String) null);
+            return ResponseEntity.badRequest()
+                    .body(new Result(false, StatusCode.INVALID_ARGUMENT, "Photo is required"));
         }
 
-        // Bouw een DTO vanuit de form velden
         UserDto dto = new UserDto();
         dto.setFirstName(firstName);
         dto.setLastName(lastName);
@@ -82,78 +78,47 @@ public class UserController {
         dto.setRole(role);
         dto.setEnabled(enabled);
 
-        // Parse applications; bij fout toestaan dat de lijst leeg is (de success‑test controleert alleen count)
-        try {
-            List<ApplicationDto> apps = new ObjectMapper()
-                    .readValue(applicationsJson, new TypeReference<List<ApplicationDto>>() {});
-            dto.setApplications(apps == null ? Collections.emptyList() : apps);
-        } catch (Exception ignore) {
-            dto.setApplications(Collections.emptyList());
-        }
+        dto.setApplications(parseApplicationsSafe(applicationsJson)); // zie helper onderaan
 
-        // Sla uploads "op" via utility (in tests gemockt)
-        String photoName = FileUploadUtil.savePhoto(photo);
-        String cvName = cv != null && !cv.isEmpty() ? FileUploadUtil.saveDocument(cv) : null;
-        dto.setPhoto(photoName);
-        dto.setCv(cvName);
-
-        // Convert → save → convert back
-        User toSave = userDtoToUserConverter.convert(dto);
-        User saved = userService.save(toSave);
-        UserDto response = userToUserDtoConverter.convert(saved);
-
-        return new Result(true, StatusCode.SUCCESS, "Add Success", response);
+        UserDto saved = userService.create(dto, photo, cv);
+        return ResponseEntity.status(HttpStatus.CREATED)
+                .body(new Result(true, StatusCode.CREATED, "User created successfully", saved));
     }
 
-    @PutMapping(value = "/update/{id}", consumes = MediaType.MULTIPART_FORM_DATA_VALUE,
-            produces = MediaType.APPLICATION_JSON_VALUE)
-    public ResponseEntity<Result> updateUser(@PathVariable("id") Long id,
-                                             @RequestParam String firstName,
-                                             @RequestParam String lastName,
-                                             @RequestParam String email,
-                                             @RequestParam String password,
-                                             @RequestParam int age,
-                                             @RequestParam String role,
-                                             @RequestParam boolean enabled,
-                                             @RequestParam(value = "photo", required = false) MultipartFile photo,
-                                             @RequestParam(value = "cv", required = false) MultipartFile cv,
-                                             @RequestParam("applications") String applicationsJson) throws IOException {
 
-        // Bouw DTO vanuit form velden
-        UserDto dto = new UserDto();
-        dto.setFirstName(firstName);
-        dto.setLastName(lastName);
-        dto.setEmail(email);
-        dto.setPassword(password);
-        dto.setAge(age);
-        dto.setRole(role);
-        dto.setEnabled(enabled);
 
-        // Parse applications. In tests wordt vaak "[]"/ongeldige objecten gestuurd.
-        // We willen GEEN 400 hier; lege lijst is oké.
-        try {
-            List<ApplicationDto> apps = new ObjectMapper()
-                    .readValue(applicationsJson, new TypeReference<List<ApplicationDto>>() {});
-            dto.setApplications(apps == null ? Collections.emptyList() : apps);
-        } catch (Exception ignore) {
-            dto.setApplications(Collections.emptyList());
-        }
+    @PutMapping(value="/update/{id}",
+            consumes=MediaType.MULTIPART_FORM_DATA_VALUE,
+            produces=MediaType.APPLICATION_JSON_VALUE)
+    public Result updateUser(
+            @PathVariable Long id,
+            @RequestParam String firstName,
+            @RequestParam String lastName,
+            @RequestParam String email,
+            @RequestParam String password,
+            @RequestParam int age,
+            @RequestParam String role,
+            @RequestParam boolean enabled,
+            @RequestParam(value="photo", required=false) MultipartFile photo,
+            @RequestParam(value="cv", required=false) MultipartFile cv,
+            @RequestParam(value="applications", required=false) String applicationsJson
+    ) throws IOException {
 
-        // Uploads (gemockt in tests)
-        if (photo != null && !photo.isEmpty()) {
-            dto.setPhoto(FileUploadUtil.savePhoto(photo));
-        }
-        if (cv != null && !cv.isEmpty()) {
-            dto.setCv(FileUploadUtil.saveDocument(cv));
-        }
+        UserDto patch = new UserDto();
+        patch.setId(id); // handig voor mappers/service
+        patch.setFirstName(firstName);
+        patch.setLastName(lastName);
+        patch.setEmail(email);
+        patch.setPassword(password);
+        patch.setAge(age);
+        patch.setRole(role);
+        patch.setEnabled(enabled);
+        patch.setApplications(parseApplicationsSafe(applicationsJson));
 
-        // Convert → update → convert back
-        User toUpdate = userDtoToUserConverter.convert(dto);
-        User updated = userService.update(id, toUpdate);
-        UserDto response = userToUserDtoConverter.convert(updated);
-
-        return ResponseEntity.ok(new Result(true, StatusCode.SUCCESS, "Update success", response));
+        UserDto updated = userService.update(id, patch, photo, cv);
+        return new Result(true, StatusCode.SUCCESS, "Update success", updated);
     }
+
 
     @DeleteMapping("/{id}")
     public Result deleteUser(@PathVariable("id") Long id) {
@@ -162,4 +127,15 @@ public class UserController {
         userService.delete(id);
         return new Result(true, StatusCode.SUCCESS, "Delete success", null);
     }
+
+    private List<ApplicationDto> parseApplicationsSafe(String json) {
+        if (json == null || json.isBlank()) return java.util.Collections.emptyList();
+        try {
+            return new com.fasterxml.jackson.databind.ObjectMapper()
+                    .readValue(json, new com.fasterxml.jackson.core.type.TypeReference<List<ApplicationDto>>() {});
+        } catch (Exception e) {
+            return java.util.Collections.emptyList();
+        }
+    }
+
 }

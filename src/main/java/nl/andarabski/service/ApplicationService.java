@@ -3,6 +3,7 @@ package nl.andarabski.service;
 import jakarta.persistence.EntityManager;
 import jakarta.persistence.PersistenceContext;
 import jakarta.transaction.Transactional;
+import lombok.RequiredArgsConstructor;
 import nl.andarabski.converter.ApplicationDtoToApplicationConverter;
 import nl.andarabski.converter.ApplicationToApplicationDtoConverter;
 import nl.andarabski.dto.ApplicationDto;
@@ -15,6 +16,7 @@ import nl.andarabski.repository.ApplicationRepository;
 import nl.andarabski.repository.UserRepository;
 import nl.andarabski.repository.VacancyRepository;
 import nl.andarabski.system.exception.ObjectNotFoundException;
+import org.springframework.dao.EmptyResultDataAccessException;
 import org.springframework.stereotype.Service;
 
 import java.util.Date;
@@ -23,58 +25,118 @@ import java.util.Objects;
 import java.util.stream.Collectors;
 
 @Service
+@RequiredArgsConstructor
 @Transactional
 public class ApplicationService {
 
     private final ApplicationRepository applicationRepository;
     private final VacancyRepository vacancyRepository;
     private final UserRepository userRepository;
-    private final ApplicationToApplicationDtoConverter toApplicationDtoConverter;
-    private final ApplicationDtoToApplicationConverter dtoToApplicationConverter;
+    private final ApplicationMapper applicationMapper;
 
-    @PersistenceContext
-    private EntityManager entityManager;
 
-    public ApplicationService(ApplicationRepository applicationRepository, VacancyRepository vacancyRepository, UserRepository userRepository, ApplicationToApplicationDtoConverter toApplicationDtoConverter, ApplicationDtoToApplicationConverter dtoToApplicationConverter) {
-        this.applicationRepository = applicationRepository;
-
-        this.vacancyRepository = vacancyRepository;
-        this.userRepository = userRepository;
-        this.toApplicationDtoConverter = toApplicationDtoConverter;
-        this.dtoToApplicationConverter = dtoToApplicationConverter;
-    }
 
     @org.springframework.transaction.annotation.Transactional(readOnly = true)
     public List<ApplicationDto> findAll() {
-        return applicationRepository.findAll().stream().map(toApplicationDtoConverter::convert).collect(Collectors.toList());
+        return applicationRepository.findAll()
+                .stream()
+                .map(applicationMapper::toDto)
+                .collect(Collectors.toList());
     }
 
+    @org.springframework.transaction.annotation.Transactional(readOnly = true)
     public ApplicationDto findById(Long applicationId) {
        Application appl = this.applicationRepository.findById(applicationId)
                 .orElseThrow(() -> new ObjectNotFoundException("Application", applicationId));
-       return toApplicationDtoConverter.convert(appl);
+       return applicationMapper.toDto(appl);
     }
 
-    public Application save(Application application) {
-        return this.applicationRepository.save(application);
+    public ApplicationDto create(ApplicationDto in) {
+
+        // 1) Sanity checks
+        if (in == null) {
+            throw new IllegalArgumentException("ApplicationDto is required");
+        }
+        if (in.getId() != null) {
+            // bij create hoort geen id vanuit de client
+            throw new IllegalArgumentException("New applications must not have an id");
+        }
+        if (in.getUserId() == null || in.getVacancyId() == null) {
+            throw new IllegalArgumentException("New applications must not have an id");
+        }
+
+        // 2) Scalars mappen via mapper (collecties/applications worden genegeerd in de mapper)
+        Application app = applicationMapper.toEntity(in);
+
+        // 3) Applications expliciet omzetten + back-reference zetten
+        User userRef = new User();
+        userRef.setId(in.getId());
+        app.setUser(userRef);
+
+        Vacancy vacancyRef = new Vacancy();
+        vacancyRef.setId(in.getVacancyId());
+        app.setVacancy(vacancyRef);
+
+        // 3) Defaults/validatie
+        if(app.getStatus() == null){
+            app.setStatus(ApplicationStatus.valueOf(in.getStatus()));
+        }
+        if(app.getStatus() == null){
+            app.setAppliedAt(Date.from(java.time.Instant.now()));
+        }
+        Application saved = applicationRepository.save(app);
+        return applicationMapper.toDto(saved);
     }
 
-    public Application update(Long applicationId, Application application) {
+    public ApplicationDto update(Long applicationId, ApplicationDto patch) {
         Application existing = this.applicationRepository.findById(applicationId)
                 .orElseThrow(() -> new ObjectNotFoundException("Application is with Id: ", applicationId));
-        existing.setUser(application.getUser());
-        existing.setVacancy(application.getVacancy());
-        existing.setMotivation(application.getMotivation());
-        existing.setStatus(application.getStatus());
-        existing.setAppliedAt(application.getAppliedAt());
-        return this.applicationRepository.save(existing);
+        // 3) Applications expliciet omzetten + back-reference zetten
+        if (patch.getUserId() != null) {
+            User userRef = new User();
+            userRef.setId(patch.getId());
+            existing.setUser(userRef);
+        }
+
+        if (patch.getVacancyId() != null) {
+            Vacancy vacancyRef = new Vacancy();
+            vacancyRef.setId(patch.getVacancyId());
+            existing.setVacancy(vacancyRef);
+        }
+
+        if(patch.getMotivation() != null) {
+            existing.setMotivation(patch.getMotivation());
+        }
+
+        // 3) Defaults/validatie
+        if(patch.getStatus() == null){
+            try {
+                existing.setStatus(ApplicationStatus.valueOf(patch.getStatus()));
+            } catch (IllegalArgumentException e) {
+                throw new IllegalArgumentException("Invalid status: " + patch.getStatus());
+            }
+        }
+
+        if(patch.getAppliedAt() == null){
+            existing.setAppliedAt(patch.getAppliedAt());
+        } else if (existing.getAppliedAt() == null) {
+            existing.setAppliedAt(Date.from(java.time.Instant.now()));
+        }
+
+        Application saved = applicationRepository.save(existing);
+        return applicationMapper.toDto(saved);
 
     }
 
     public void delete(Long applicationId) {
-      this.applicationRepository.findById(applicationId)
-                .orElseThrow(() -> new ObjectNotFoundException("Application", applicationId));
-       this.applicationRepository.deleteById(applicationId);
+       if(applicationId == null) {
+           throw new IllegalArgumentException("ApplicationId is required");
+       }
+       try {
+           applicationRepository.deleteById(applicationId);
+       } catch (EmptyResultDataAccessException e) {
+           throw new ObjectNotFoundException("Application with Id: " + applicationId + " not found");
+       }
     }
 
     public Application applyToVacancy(Long userId, Long vacancyId, String motivation) {
@@ -86,25 +148,20 @@ public class ApplicationService {
         Vacancy vacancy = this.vacancyRepository.findById(vacancyId)
                 .orElseThrow(() -> new ObjectNotFoundException("Vacancy", vacancyId));
 
-        // Check if this user has already applied for this vacancy
-        var apps = applicationRepository.findAll();
-        System.out.println("DEBUG: aantal sollicitaties gevonden: " + applicationRepository.findAll().size());
-        boolean alreadyApplied = apps
-                .stream()
-                .anyMatch(app -> Objects.equals( app.getUser().getId(), userId)
-                                        && Objects.equals(app.getVacancy().getId(), vacancyId));
-
-        if (alreadyApplied) {
-            throw new IllegalArgumentException("Vacancy already applied to this vacancy");
+        // Bestaat al?
+        if (applicationRepository.existsByUserIdAndVacancyId(userId, vacancyId)) {
+            throw new IllegalArgumentException("User already applied to this vacancy");
         }
 
+        // Nieuwe application
         Application application = new Application();
         application.setUser(user);
         application.setVacancy(vacancy);
         application.setMotivation(motivation);
-        application.setAppliedAt(new Date());
+        application.setAppliedAt(java.sql.Date.from(java.time.Instant.now()));
         application.setStatus(ApplicationStatus.PENDING);
-        // update bidirectional collections (null-safe)
+
+        // (optioneel) backrefs bijhouden in-memory
         if (user.getApplications() != null) {
             user.getApplications().add(application);
         }
@@ -112,7 +169,7 @@ public class ApplicationService {
             vacancy.getApplications().add(application);
         }
 
-        return this.applicationRepository.save(application);
+        return applicationRepository.save(application);
 
     }
 

@@ -1,333 +1,252 @@
 package nl.andarabski.controller;
 
-import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
-import nl.andarabski.converter.UserDtoToUserConverter;
-import nl.andarabski.converter.UserToUserDtoConverter;
 import nl.andarabski.dto.ApplicationDto;
 import nl.andarabski.dto.UserDto;
-import nl.andarabski.model.User;
+import nl.andarabski.mapper.UserMapper;
+import nl.andarabski.model.Application;
+import nl.andarabski.model.ApplicationStatus;
 import nl.andarabski.service.UserService;
 import nl.andarabski.system.StatusCode;
+import nl.andarabski.system.exception.ExceptionHandlerAdvice;
 import nl.andarabski.system.exception.ObjectNotFoundException;
-import nl.andarabski.util.FileUploadUtil;
+import nl.andarabski.testsupport.TD;
+import nl.andarabski.testsupport.web.RestMatchers;
 import nl.andarabski.utils.StubDataDtos;
-import nl.andarabski.utils.StubDataEntities;
+
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
-import org.mockito.Mockito;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureMockMvc;
 import org.springframework.boot.test.context.SpringBootTest;
+import org.springframework.context.annotation.Import;
 import org.springframework.http.MediaType;
 import org.springframework.mock.web.MockMultipartFile;
-import org.springframework.test.context.TestPropertySource;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.test.web.servlet.MockMvc;
+import org.springframework.web.multipart.MultipartFile;
 
-import static org.mockito.ArgumentMatchers.any;
-import static org.mockito.ArgumentMatchers.eq;
+import static nl.andarabski.testsupport.TD.FIXED_DATE;
+import static nl.andarabski.testsupport.TD.applicationDto;
 import static org.mockito.BDDMockito.given;
-import static org.mockito.Mockito.doThrow;
-import static org.mockito.Mockito.when;
+import static org.mockito.ArgumentMatchers.any;
 
-import java.util.ArrayList;
+
+import java.time.ZoneOffset;
+import java.time.format.DateTimeFormatter;
+import java.util.Collections;
 import java.util.List;
 
+import static org.mockito.Mockito.*;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.*;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
 @SpringBootTest
+//@WebMvcTest(UserController.class)
 @AutoConfigureMockMvc(addFilters = false)
-@TestPropertySource(properties = "api.endpoint.base-url=/api/v1")
+@Import(ExceptionHandlerAdvice.class)
+//@TestPropertySource(properties = "api.endpoint.base-url=/api/v1")
 class UserControllerTest {
 
-    @Autowired
-    private MockMvc mockMvc;
+    @Autowired private MockMvc mockMvc;
+    @MockitoBean private UserService userService;
+    @MockitoBean UserMapper userMapper;
 
-    @MockitoBean
-    private UserService userService;
-
-    @MockitoBean
-    private UserDtoToUserConverter userDtoToUserConverter;
-
-    @MockitoBean
-    private UserToUserDtoConverter userToUserDtoConverter;
-    @Autowired
-    ObjectMapper objectMapper;
 
     @Value("${api.endpoint.base-url}")
     String baseUrl;
+    private static final String USER = "User";
+    String expected = DateTimeFormatter.ISO_OFFSET_DATE_TIME.format(
+            FIXED_DATE.toInstant().atOffset(ZoneOffset.UTC)   // of je eigen zone
+    );
 
-    @MockitoBean
-    List<UserDto> users;
-    @MockitoBean
-    private StubDataDtos stubDataDtos;
-
-    // Testdata als DTO’s (niet als entiteiten!)
-    private UserDto user1, user2, user3;
-
-    private final static String OBJECT_USER = "User";
-
-
-    @BeforeEach
-    void setUp() {
-
-        users = new ArrayList<>();
-        stubDataDtos = new StubDataDtos();
-
-        user1 = new UserDto();
-        user1.setFirstName("Andre");
-        user1.setLastName("Dabski");
-        user1.setEmail("test@gmail.com");
-        user1.setPassword("12345");
-        user1.setAge(25);
-        user1.setPhoto("src/main/resources/mock/leeuw.jpeg");
-        user1.setCv("src/main/resources/mock/Cv_One.pdf");
-        user1.setRole("admin");
-        user1.setEnabled(true);
-        user1.setApplications(stubDataDtos.getListApplications());
-
-        user2 = new UserDto();
-        user2.setFirstName("John");
-        user2.setLastName("Johnson");
-        user2.setEmail("test@gmail.com");
-        user2.setPassword("54321");
-        user2.setAge(25);
-        user2.setPhoto("src/main/resources/mock/natuur.jpeg");
-        user2.setCv("src/main/resources/mock/Cv_Two.pdf");
-        user2.setRole("admin user");
-        user2.setEnabled(true);
-        user2.setApplications(stubDataDtos.getListApplications());
-
-        user3 = new UserDto();
-        user3.setFirstName("Sonny");
-        user3.setLastName("Andarabski");
-        user3.setEmail("test@gmail.com");
-        user3.setPassword("12345");
-        user3.setAge(21);
-        user3.setPhoto("src/main/resources/mock/vlinder.jpeg");
-        user3.setCv("src/main/resources/mock/Cv_Three.pdf");
-        user3.setRole("user");
-        user3.setEnabled(true);
-        user3.setApplications(stubDataDtos.getListApplications());
-
-        this.users.add(user1);
-        this.users.add(user2);
-        this.users.add(user3);
-    }
 
     @Test
     void findUserByIdSuccess() throws Exception {
         // Given
-        given(this.userService.findById(eq(1L))).willReturn(users.get(0));
+       var dto = new UserDto();
+       dto.setId(1L);
+       dto.setFirstName("Andre");
+       dto.setLastName("Dabski");
+       dto.setApplications(List.of(
+                applicationDto(10L, 1L, 3L, "APPLIED", "ok"),
+                applicationDto(11L, 1L, 3L, "PENDING", "ok2")
+        ));
+
+        given(userService.findById(1L)).willReturn(dto);
 
         // When and when
         this.mockMvc.perform(get(baseUrl + "/users/1").accept(MediaType.APPLICATION_JSON))
+                .andExpect(status().isOk())
                 .andExpect(jsonPath("$.flag").value(true))
                 .andExpect(jsonPath("$.code").value(StatusCode.SUCCESS))
                 .andExpect(jsonPath("$.message").value("Find One Success"))
                 .andExpect(jsonPath("$.data.firstName").value("Andre"))
-                .andExpect(jsonPath("$.data.lastName").value("Dabski"))
-                .andExpect(jsonPath("$.data.email").value("test@gmail.com"))
-                .andExpect(jsonPath("$.data.password").value("12345"))
-                .andExpect(jsonPath("$.data.age").value(25))
-                .andExpect(jsonPath("$.data.photo").value("src/main/resources/mock/leeuw.jpeg"))
-                .andExpect(jsonPath("$.data.cv").value("src/main/resources/mock/Cv_One.pdf"))
-                .andExpect(jsonPath("$.data.role").value("admin"))
-                .andExpect(jsonPath("$.data.enabled").value(true))
                 .andExpect(jsonPath("$.data.applications[0].status").value("APPLIED"));
-                //.andExpect(jsonPath("$.data.applications").value(2));
-
+        verify(userService).findById(1L);
     }
 
     @Test
-    void findUserByIdNotFound() throws Exception {
+    void findUserByIdNotFoundMapsTo404() throws Exception {
         // GIVEN
-        given(this.userService.findById(eq(1L))).willThrow(new ObjectNotFoundException(OBJECT_USER, 1L ));
+        when(userService.findById(404L))
+                .thenThrow(new ObjectNotFoundException("User", 404L));
 
         // WHEN AND THEN
-        this.mockMvc.perform(get(baseUrl + "/users/1").accept(MediaType.APPLICATION_JSON))
+        this.mockMvc.perform(get(baseUrl + "/users/404").accept(MediaType.APPLICATION_JSON))
+                .andExpect(status().isNotFound())
                 .andExpect(jsonPath("$.flag").value(false))
                 .andExpect(jsonPath("$.code").value(StatusCode.NOT_FOUND))
-                .andExpect(jsonPath("$.message").value("Could not find " + OBJECT_USER + " with Id: 1 :(" ))
-                .andExpect(jsonPath("$.data").isEmpty());
+                .andExpect(jsonPath("$.message").value("Could not find " + USER + " with Id: 404 :(" ))
+                .andExpect(jsonPath("$.data").value(org.hamcrest.Matchers.nullValue()));
     }
+
 
     @Test
     void findAllUsers() throws Exception {
         // GIVEN
-        given(this.userService.findAll()).willReturn(users);
+        var a = new UserDto(); a.setId(1L); a.setFirstName("Andarabi"); a.setPhoto("leeuw.jpeg"); a.setCv("Cv_One.pdf"); a.setApplications(List.of(
+                applicationDto(10L, 1L, 3L, "APPLIED", "ok"),
+                applicationDto(11L, 1L, 3L, "PENDING", "ok2")
+        ));
+        var b = new UserDto(); b.setId(2L); b.setFirstName("Sanny"); b.setPhoto("vlinder.jpeg"); b.setCv("Cv_Two.pdf"); b.setApplications(List.of(
+                applicationDto(10L, 1L, 3L, "APPLIED", "ok"),
+                applicationDto(11L, 1L, 3L, "PENDING", "ok2")
+        ));
+        when(this.userService.findAll()).thenReturn(List.of(a, b));
 
         // WHEN AND THEN
         this.mockMvc.perform(get(baseUrl + "/users").accept(MediaType.APPLICATION_JSON))
+                .andExpect(status().isOk())
                 .andExpect(jsonPath("$.flag").value(true))
                 .andExpect(jsonPath("$.code").value(StatusCode.SUCCESS))
                 .andExpect(jsonPath("$.message").value("Find All Success"))
-                .andExpect(jsonPath("$.data[0].firstName").value("Andre"))
-                .andExpect(jsonPath("$.data[0].lastName").value("Dabski"))
-                .andExpect(jsonPath("$.data[0].email").value("test@gmail.com"))
-                .andExpect(jsonPath("$.data[0].password").value("12345"))
-                .andExpect(jsonPath("$.data[0].age").value(25))
-                .andExpect(jsonPath("$.data[0].photo").value("src/main/resources/mock/leeuw.jpeg"))
-                .andExpect(jsonPath("$.data[0].cv").value("src/main/resources/mock/Cv_One.pdf"))
-                .andExpect(jsonPath("$.data[0].role").value("admin"))
-                .andExpect(jsonPath("$.data[0].enabled").value(true))
+                .andExpect(jsonPath("$.data[0].firstName").value("Andarabi"))
+                .andExpect(jsonPath("$.data[0].photo").value("leeuw.jpeg"))
+                .andExpect(jsonPath("$.data[0].cv").value("Cv_One.pdf"))
                 .andExpect(jsonPath("$.data[0].applications[0].status").value("APPLIED"))
-                .andExpect(jsonPath("$.data[1].firstName").value("John"))
-                .andExpect(jsonPath("$.data[1].lastName").value("Johnson"))
-                .andExpect(jsonPath("$.data[1].email").value("test@gmail.com"))
-                .andExpect(jsonPath("$.data[1].password").value("54321"))
-                .andExpect(jsonPath("$.data[1].age").value(25))
-                .andExpect(jsonPath("$.data[1].photo").value("src/main/resources/mock/natuur.jpeg"))
-                .andExpect(jsonPath("$.data[1].cv").value("src/main/resources/mock/Cv_Two.pdf"))
-                .andExpect(jsonPath("$.data[1].role").value("admin user"))
-                .andExpect(jsonPath("$.data[1].enabled").value(true))
+
+                .andExpect(jsonPath("$.data[1].firstName").value("Sanny"))
+                .andExpect(jsonPath("$.data[1].photo").value("vlinder.jpeg"))
+                .andExpect(jsonPath("$.data[1].cv").value("Cv_Two.pdf"))
                 .andExpect(jsonPath("$.data[1].applications[1].status").value("PENDING"));
+        verify(this.userService).findAll();
     }
 
+
     @Test
-    void createUser() throws Exception {
-        // 1) Applications JSON (zoals controller verwacht)
-        var apps = java.util.List.of(
-                new ApplicationDto() {{ setId(1L); setStatus("APPLIED"); setMotivation("ok"); }},
-                new ApplicationDto() {{ setId(2L); setStatus("PENDING"); setMotivation("ok"); }}
+    void createUser_withPhotoAndCv_201() throws Exception {
+        // files
+        var photo = new MockMultipartFile("photo","avatar.jpg","image/jpeg","img".getBytes());
+        var cv    = new MockMultipartFile("cv","resume.pdf","application/pdf","pdf".getBytes());
+
+        String applicationsJson = "[]";
+
+        var saved = new UserDto();
+        saved.setId(1L);
+        saved.setFirstName("Andarabi");
+        saved.setPhoto("avatar.jpg");
+        saved.setCv("resume.pdf");
+        saved.setApplications(Collections.emptyList());
+
+        when(userService.create(any(UserDto.class), any(MultipartFile.class), any(MultipartFile.class))).thenReturn(saved);
+
+        // applications als JSON string (de controller leest dit als String en parset zelf)
+        var apps = List.of(
+                new Application() {{ setId(1L); setStatus(ApplicationStatus.APPLIED); setMotivation("ok"); }},
+                new Application() {{ setId(2L); setStatus(ApplicationStatus.PENDING); setMotivation("ok2"); }}
         );
-        String appsJson = new com.fasterxml.jackson.databind.ObjectMapper().writeValueAsString(apps);
 
-        // 2) Files
-        var photo = new org.springframework.mock.web.MockMultipartFile(
-                "photo", "p.jpg", "image/jpeg", "img".getBytes());
-        var cv = new org.springframework.mock.web.MockMultipartFile(
-                "cv", "c.pdf", "application/pdf", "pdf".getBytes());
-
-        // 3) Converters + service stubs
-        // Controller: UserDto → User (voor save)
-        var entityToSave = new User();
-        when(userDtoToUserConverter.convert(any(UserDto.class)))
-                .thenReturn(entityToSave);
-
-        // Service: save(User) → User (saved)
-        var savedEntity = new User();
-        savedEntity.setId(4L);
-        when(userService.save(any(User.class)))
-                .thenReturn(savedEntity);
-
-        // Controller: User → UserDto (response)
-        var responseDto = new UserDto();
-        responseDto.setId(4L);
-        responseDto.setFirstName("Sanny");
-        responseDto.setLastName("Andarabi");
-        responseDto.setEmail("sanny.and@gmail.com");
-        responseDto.setAge(25);
-        responseDto.setRole("admin");
-        responseDto.setEnabled(true);
-        responseDto.setApplications(apps);
-        when(userToUserDtoConverter.convert(savedEntity))
-                .thenReturn(responseDto);
-
-        // 4) Static utilities mocken zodat er geen echte disk-I/O is
-        try (var mocked = org.mockito.Mockito.mockStatic(FileUploadUtil.class)) {
-            mocked.when(() -> FileUploadUtil.savePhoto(any())).thenReturn("photo.png");
-            mocked.when(() -> FileUploadUtil.saveDocument(any())).thenReturn("cv.pdf");
-
-            mockMvc.perform(
-                            multipart(baseUrl + "/users/add")
-                                    .file(photo)
-                                    .file(cv)
-                                    .param("firstName", "Andre")
-                                    .param("lastName", "Dabski")
-                                    .param("email", "test@gmail.com")
-                                    .param("password", "12345")
-                                    .param("age", "25")
-                                    .param("role", "admin")
-                                    .param("enabled", "true")
-                                    .param("applications", appsJson)
-                                    // multipart() gebruikt standaard POST voor file upload, maar expliciet kan ook:
-                                    .with(req -> { req.setMethod("POST"); return req; })
-                                    .accept(MediaType.APPLICATION_JSON)
+            // --- Act + Assert ---
+        mockMvc.perform(multipart(baseUrl + "/users/add")
+                            .file(photo)
+                            .file(cv)
+                            .param("firstName", "Andarabi")
+                            .param("lastName", "Sanny")
+                            .param("email", "s.andarabi@gmail.com")
+                            .param("password", "secret")
+                            .param("age", "15")
+                            .param("role", "admin")
+                            .param("enabled", "true")
+                            .param("applications", applicationsJson)
                     )
-
-                    // HTTP status komt van @ResponseStatus(HttpStatus.CREATED)
                     .andExpect(status().isCreated())
                     .andExpect(jsonPath("$.flag").value(true))
-                    // Body code is 200 omdat jij dat zelf zo zet in new Result(true, 200, "Add Success", ...)
-                    .andExpect(jsonPath("$.code").value(200))
-                    .andExpect(jsonPath("$.message").value("Add Success"))
-                    .andExpect(jsonPath("$.data.id").value(4L))
-                    .andExpect(jsonPath("$.data.firstName").value("Sanny"))
-                    .andExpect(jsonPath("$.data.applications.length()").value(apps.size()));
+                    // jouw Result gebruikt StatusCode.SUCCESS in de body, ondanks HTTP 201
+                    .andExpect(jsonPath("$.code").value(StatusCode.CREATED))
+                    .andExpect(jsonPath("$.message").value("User created successfully"))
+                    .andExpect(jsonPath("$.data.id").value(1))
+                    .andExpect(jsonPath("$.data.firstName").value("Andarabi"))
+                    // veldnamen komen uit jouw UserDto (controller zet dto.setPhoto/dto.setCv)
+                    .andExpect(jsonPath("$.data.photo").value("avatar.jpg"))
+                    .andExpect(jsonPath("$.data.cv").value("resume.pdf"))
+                    .andExpect(jsonPath("$.data.applications.length()").value(0));
 
+            verify(userService).create(any(UserDto.class), any(MultipartFile.class), any(MultipartFile.class));
         }
-
-    }
 
 
     @Test
-    void createUserNotFound() throws Exception {
-        // Deze test checkt een 400 door validatie (geen foto). “NotFound” past niet echt bij create;
-        // maar zo vul je hem inhoudelijk met een nuttige negatieve case.
-        var cv = new MockMultipartFile("cv", "c.pdf", "application/pdf", "pdf".getBytes());
-      //  var photo = new MockMultipartFile("photo", "c.jpg", "application/jpg", "jpg".getBytes());
-        String appsJson = new ObjectMapper().writeValueAsString(List.of(new ApplicationDto()));
+    void createUser_missingPhoto_404() throws Exception {
+        var cv = new MockMultipartFile("cv","resume.pdf","application/pdf","pdf".getBytes());
 
-        mockMvc.perform(
-                        multipart(baseUrl + "/users/add")
-                                .file(cv) // GEEN 'photo'
-                              //  .file(photo)
-                                .param("firstName", "Andre")
-                                .param("lastName", "Dabski")
-                                .param("email", "test@gmail.com")
-                                .param("password", "12345")
-                                .param("age", "25")
-                                .param("role", "admin")
-                                .param("enabled", "true")
-                                .param("applications", appsJson)
-                                .with(req -> { req.setMethod("POST"); return req; })
-                                .accept(MediaType.APPLICATION_JSON)
+        mockMvc.perform(multipart(baseUrl + "/users/add")
+                       // .file(photo)
+                        .file(cv) // GEEN photo
+                        .param("firstName","Andre")
+                        .param("lastName","Dabski")
+                        .param("email","a@b.com")
+                        .param("password","secret")
+                        .param("age","30")
+                        .param("role","admin")
+                        .param("enabled","true")
+                        .param("applications","[]")
                 )
-                .andExpect(status().isNotFound())
+                .andExpect(status().isBadRequest())
                 .andExpect(jsonPath("$.flag").value(false))
-                .andExpect(jsonPath("$.code").value(StatusCode.NOT_FOUND))
-                .andExpect(jsonPath("$.message").value("Could not find photo with Id: null :("));
+                .andExpect(jsonPath("$.code").value(StatusCode.INVALID_ARGUMENT))
+                .andExpect(jsonPath("$.message").value("Photo is required"))
+                .andExpect(jsonPath("$.data").isEmpty());
     }
+
 
    @Test
     void updateUserSuccess() throws Exception {
-        Long userId = 7L;
+        Long userId = 2L, vacancyId = 3L;
 
         var photo = new MockMultipartFile("photo", "p.jpg", "image/jpeg", "img".getBytes());
         var cv    = new MockMultipartFile("cv", "c.pdf", "application/pdf", "pdf".getBytes());
         String appsJson = new ObjectMapper().writeValueAsString(List.of(new ApplicationDto()));
 
+
         // Stubs converters + service
-        UserDto incomingDto = new UserDto();
-        incomingDto.setApplications(List.of(new ApplicationDto()));
+       var in = TD.applicationDto(0L, 1L, 3L, "PENDING", "Motiv");
+       var out = TD.applicationDto(42L, 1L, 3L, "PENDING", "Motiv");
 
-        User toUpdateEntity = new User();
-        User updatedEntity  = new User(); updatedEntity.setId(userId);
-        UserDto responseDto = new UserDto(); responseDto.setId(userId); responseDto.setFirstName("Updated");
+        var saved = new UserDto();
+        saved.setId(2L);
+        saved.setFirstName("Sanny");
+        saved.setLastName("Andarabi");
+        saved.setEmail("s.andarabi@gmail.com");
+        saved.setPassword("12345");
+        saved.setAge(25);
+        saved.setRole("admin");
+        saved.setEnabled(true);
+        saved.setPhoto("photo.jpg");
+        saved.setCv("resume.pdf");
+        saved.setApplications(List.of(in, out));
 
-        // Controller converteert DTO->Entity vóór save/update:
-        when(userDtoToUserConverter.convert(any(UserDto.class))).thenReturn(toUpdateEntity);
-        // Service voert update uit (pas de signatuur aan naar jouw service!)
-        when(userService.update(eq(userId), any(User.class))).thenReturn(updatedEntity);
-        // Controller converteert Entity->DTO voor response:
-        when(userToUserDtoConverter.convert(updatedEntity)).thenReturn(responseDto);
-
-        try (var mocked = Mockito.mockStatic(FileUploadUtil.class)) {
-            mocked.when(() -> FileUploadUtil.savePhoto(any())).thenReturn("photo.png");
-            mocked.when(() -> FileUploadUtil.saveDocument(any())).thenReturn("cv.pdf");
+       when(userService.update(eq(userId), any(UserDto.class), any(MultipartFile.class), any(MultipartFile.class))).thenReturn(saved);
 
             mockMvc.perform(
                             multipart(baseUrl + "/users/update/{id}", userId)
                                     .file(photo)
                                     .file(cv)
-                                    .param("firstName", "Andre")
-                                    .param("lastName", "Dabski")
-                                    .param("email", "test@gmail.com")
+                                    .param("firstName", "Andere")
+                                    .param("lastName", "Kings")
+                                    .param("email", "s.andarabi@gmail.com")
                                     .param("password", "12345")
                                     .param("age", "25")
                                     .param("role", "admin")
@@ -338,11 +257,20 @@ class UserControllerTest {
                     )
                     .andExpect(status().isOk()) // of isCreated() als jij 201 terugstuurt
                     .andExpect(jsonPath("$.flag").value(true))
-                    .andExpect(jsonPath("$.message").value(org.hamcrest.Matchers.containsStringIgnoringCase("Update")))
-                    .andExpect(jsonPath("$.data.id").value(userId))
-                    .andExpect(jsonPath("$.data.firstName").value("Updated"));
+                    .andExpect(jsonPath("$.code").value(StatusCode.SUCCESS))
+                    .andExpect(jsonPath("$.message").value("Update success"))
+                    .andExpect(jsonPath("$.data.id").value(2L))
+                    .andExpect(jsonPath("$.data.firstName").value("Sanny"))
+                    .andExpect(jsonPath("$.data.lastName").value("Andarabi"))
+                    .andExpect(jsonPath("$.data.email").value("s.andarabi@gmail.com"))
+                    .andExpect(jsonPath("$.data.password").value("12345"))
+                    .andExpect(jsonPath("$.data.age").value(25))
+                    .andExpect(jsonPath("$.data.role").value("admin"))
+                    .andExpect(jsonPath("$.data.enabled").value(true))
+                    .andExpect(jsonPath("$.data.applications.length()").value(2));
+            verify(userService).update(eq(userId), any(UserDto.class), any(MultipartFile.class), any(MultipartFile.class));
         }
-    }
+
 
     @Test
     void updateUserNotFound() throws Exception {
@@ -352,36 +280,34 @@ class UserControllerTest {
         var cv = new MockMultipartFile("cv", "c.pdf", "application/pdf", "pdf".getBytes());
         String appsJson = "[]";
 
-        when(userDtoToUserConverter.convert(any(UserDto.class))).thenReturn(new User());
-        when(userService.update(eq(userId), any(User.class)))
+        // wél de not-found simuleren:
+        when(userService.update(eq(userId), any(UserDto.class), any(MultipartFile.class), any(MultipartFile.class)))
                 .thenThrow(new ObjectNotFoundException("User", userId));
 
-        try (var mocked = Mockito.mockStatic(FileUploadUtil.class)) {
-            mocked.when(() -> FileUploadUtil.savePhoto(any())).thenReturn("photo.png");
-            mocked.when(() -> FileUploadUtil.saveDocument(any())).thenReturn("cv.pdf");
-
-            mockMvc.perform(
-                            multipart(baseUrl + "/users/update/{id}", userId)
-                                    .file(photo).file(cv)
-                                    .param("firstName", "Andre")
-                                    .param("lastName", "Dabski")
-                                    .param("email", "test@gmail.com")
-                                    .param("password", "12345")
-                                    .param("age", "25")
-                                    .param("role", "admin")
-                                    .param("enabled", "true")
-                                    .param("applications", appsJson)
-                                    .with(req -> {
-                                        req.setMethod("PUT");
-                                        return req;
-                                    })
-                                    .accept(MediaType.APPLICATION_JSON)
-                    )
-                    .andExpect(status().isNotFound())
-                    .andExpect(jsonPath("$.flag").value(false))
-                    .andExpect(jsonPath("$.message").value("Could not find " + OBJECT_USER + " with Id: 999 :(" ));
-        }
+        mockMvc.perform(
+                        multipart(baseUrl + "/users/update/{id}", userId)
+                                .file(photo).file(cv)
+                                .param("firstName", "Sanny")
+                                .param("lastName", "Andarabi")
+                                .param("email", "s.andarabi@gmail.com")
+                                .param("password", "12345")
+                                .param("age", "25")
+                                .param("role", "admin")
+                                .param("enabled", "true")
+                                .param("applications", appsJson)
+                                .with(req -> {
+                                    req.setMethod("PUT");
+                                    return req;
+                                })
+                                .accept(MediaType.APPLICATION_JSON)
+                )
+                .andExpect(status().isNotFound())
+                .andExpect(jsonPath("$.flag").value(false))
+                .andExpect(jsonPath("$.code").value(StatusCode.NOT_FOUND))
+                .andExpect(jsonPath("$.message").value("Could not find " + USER + " with Id: 999 :("))
+                .andExpect(jsonPath("$.data").value(org.hamcrest.Matchers.nullValue()));
     }
+
 
    @Test
     void deleteUserSuccess() throws Exception {
@@ -390,8 +316,11 @@ class UserControllerTest {
         mockMvc.perform(delete(baseUrl + "/users/{id}", userId))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.flag").value(true))
-                .andExpect(jsonPath("$.message", org.hamcrest.Matchers.containsStringIgnoringCase("Delete")));
+                .andExpect(jsonPath("$.code").value(StatusCode.SUCCESS))
+                .andExpect(jsonPath("$.message").value("Delete success"));
+        verify(userService).delete(userId);
     }
+
 
    @Test
     void deleteUserNotFound() throws Exception {
@@ -401,7 +330,10 @@ class UserControllerTest {
         mockMvc.perform(delete(baseUrl + "/users/{id}", userId))
                 .andExpect(status().isNotFound())
                 .andExpect(jsonPath("$.flag").value(false))
-                .andExpect(jsonPath("$.message").value("Could not find " + OBJECT_USER + " with Id: 404 :(" ));
+                .andExpect(jsonPath("$.code").value(StatusCode.NOT_FOUND))
+                .andExpect(jsonPath("$.message").value("Could not find " + USER + " with Id: 404 :(" ))
+                .andExpect(jsonPath("$.data").value(org.hamcrest.Matchers.nullValue()));
+        verify(userService).delete(userId);
     }
 
 }

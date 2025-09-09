@@ -3,10 +3,13 @@ package nl.andarabski.system.exception;
 import com.fasterxml.jackson.databind.exc.InvalidFormatException;
 import nl.andarabski.system.Result;
 import nl.andarabski.system.StatusCode;
+import org.springframework.context.support.DefaultMessageSourceResolvable;
 import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.http.HttpStatus;
+import org.springframework.http.ResponseEntity;
 import org.springframework.validation.BindException;
 import org.springframework.validation.FieldError;
+import org.springframework.web.HttpRequestMethodNotSupportedException;
 import org.springframework.web.bind.MethodArgumentNotValidException;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.ResponseStatus;
@@ -38,7 +41,7 @@ public class ExceptionHandlerAdvice {
                         (a, b) -> a,
                         LinkedHashMap::new
                 ));
-        return new Result(false, StatusCode.INVALID_ARGUMENT, "Validation failed", errors);
+        return new Result(false, StatusCode.INVALID_ARGUMENT, "Invalid request payload", errors);
     }
 
     // 400 — Bind/Type problemen bij form-data
@@ -86,9 +89,15 @@ public class ExceptionHandlerAdvice {
 
     // 501 (in jouw StatusCode benoemd als CONFLICT) — business/dataconflicten
     @ExceptionHandler({ IllegalArgumentException.class, DataIntegrityViolationException.class })
-    @ResponseStatus(HttpStatus.NOT_IMPLEMENTED)
+    @ResponseStatus(HttpStatus.CONFLICT)
     public Result handleConflict(Exception ex) {
         return new Result(false, StatusCode.CONFLICT, ex.getMessage(), null);
+    }
+
+    @ExceptionHandler(HttpRequestMethodNotSupportedException.class)
+    @ResponseStatus(HttpStatus.METHOD_NOT_ALLOWED)
+    public Result handleMethodNotSupported(HttpRequestMethodNotSupportedException ex) {
+        return new Result(false, StatusCode.METHOD_NOT_ALLOWED, "Method not allowed", ex.getMessage());
     }
 
     // 500 — Fallback
